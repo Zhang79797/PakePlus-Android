@@ -1,0 +1,1083 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>pH 试纸识别 · 拍照 + 本地图片 · 多色卡库</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --text:#e8eaed; --muted:#8b93a1;
+    --accent:#4f9dff; --ok:#35c07a; --warn:#f0b429; --bad:#e5534b;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{
+    margin:0 auto;background:var(--bg);color:var(--text);padding:14px;max-width:600px;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+  }
+  h1{font-size:17px;text-align:center;margin:2px 0 10px;font-weight:600}
+
+  .cardbar{display:flex;gap:8px;align-items:center;margin-bottom:12px}
+  .cardbar select{
+    flex:1;background:var(--panel);color:var(--text);border:1px solid rgba(255,255,255,.12);
+    padding:9px 10px;border-radius:10px;font-size:13px;
+  }
+  .cardbar button{
+    padding:9px 12px;border-radius:10px;border:none;font-size:13px;font-weight:600;
+    background:var(--accent);color:#fff;cursor:pointer;white-space:nowrap;
+  }
+  .cardbar button.ghost{background:var(--panel);color:var(--text);border:1px solid rgba(255,255,255,.12)}
+
+  .tabbar{display:flex;gap:6px;margin-bottom:10px}
+  .tabbar button{
+    flex:1;padding:9px;border-radius:10px;border:1px solid rgba(255,255,255,.12);
+    background:var(--panel);color:var(--muted);font-size:13px;font-weight:600;cursor:pointer;
+  }
+  .tabbar button.active{background:var(--accent);color:#fff;border-color:transparent}
+
+  .panel{display:none}
+  .panel.show{display:block}
+
+  .stage{position:relative;border-radius:14px;overflow:hidden;background:#000;aspect-ratio:4/3}
+  #preview{width:100%;height:100%;display:block;object-fit:fill}
+  #imgCanvas{width:100%;height:100%;display:block;object-fit:contain;background:#000}
+
+  .roi{position:absolute;border:2px dashed rgba(255,255,255,.95);border-radius:10px;
+       box-shadow:0 0 0 9999px rgba(0,0,0,.35);pointer-events:none;transition:all .2s}
+  .roi.detect{left:30%;top:37.5%;width:40%;height:25%}
+  .roi.calibrate{left:10%;top:35%;width:80%;height:30%;
+    background:repeating-linear-gradient(90deg,
+      transparent 0, transparent calc(100%/var(--n) - 1px),
+      rgba(255,255,255,.55) calc(100%/var(--n) - 1px),
+      rgba(255,255,255,.55) calc(100%/var(--n)))}
+  .roi::after{
+    content:attr(data-label);position:absolute;left:50%;bottom:-24px;transform:translateX(-50%);
+    font-size:11px;color:#fff;background:rgba(0,0,0,.65);
+    padding:2px 8px;border-radius:10px;white-space:nowrap;
+  }
+
+  /* 图片模式的可拖动框 */
+  .img-roi{
+    position:absolute;border:2px solid var(--accent);border-radius:8px;
+    background:rgba(79,157,255,.12);cursor:move;touch-action:none;
+  }
+  .img-roi::after{
+    content:"试纸反应区";position:absolute;left:50%;top:-22px;transform:translateX(-50%);
+    font-size:10px;color:#fff;background:rgba(0,0,0,.65);
+    padding:1px 7px;border-radius:8px;white-space:nowrap;
+  }
+  .img-hint{
+    position:absolute;left:50%;bottom:8px;transform:translateX(-50%);
+    font-size:11px;color:#fff;background:rgba(0,0,0,.55);
+    padding:3px 10px;border-radius:10px;white-space:nowrap;pointer-events:none;
+  }
+
+  .filebox{
+    margin-top:10px;padding:12px;border-radius:12px;
+    background:var(--panel2);border:1px dashed rgba(255,255,255,.18);
+  }
+  .filebox label{display:block;font-size:12px;font-weight:600;color:var(--accent);margin-bottom:8px;cursor:pointer}
+  .filebox input[type=file]{
+    width:100%;font-size:12px;color:var(--muted);
+    background:#0f1115;border:1px solid rgba(255,255,255,.12);
+    border-radius:8px;padding:8px;
+  }
+  .filerow{display:flex;align-items:center;gap:8px;margin-top:8px}
+  .filerow span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .filerow button{padding:8px 14px;font-size:12px}
+
+  .result{display:flex;align-items:center;gap:14px;margin:12px 0;
+    background:var(--panel);padding:14px;border-radius:14px}
+  .swatch{width:56px;height:56px;border-radius:12px;background:#333;
+    border:1px solid rgba(255,255,255,.1);flex:none}
+  .readout{flex:1;min-width:0}
+  .ph{font-size:40px;font-weight:700;line-height:1}
+  .ph small{font-size:15px;font-weight:500;color:var(--muted);margin-left:6px}
+  .meta{display:flex;gap:10px;align-items:center;margin-top:8px;flex-wrap:wrap}
+  .badge{font-size:12px;padding:3px 9px;border-radius:20px;font-weight:600}
+  .badge.ok{background:rgba(53,192,122,.16);color:var(--ok)}
+  .badge.warn{background:rgba(240,180,41,.16);color:var(--warn)}
+  .badge.bad{background:rgba(229,83,75,.16);color:var(--bad)}
+  .muted{color:var(--muted);font-size:12px}
+
+  .chart{display:flex;gap:2px;border-radius:10px;overflow:hidden;margin:6px 0 12px}
+  .chip{flex:1;height:40px;position:relative;display:flex;align-items:flex-end;
+    justify-content:center;transition:transform .15s}
+  .chip span{font-size:10px;color:#fff;background:rgba(0,0,0,.45);
+    padding:0 3px;border-radius:4px;margin-bottom:3px}
+  .chip.active{outline:2px solid #fff;outline-offset:-2px;transform:scaleY(1.12);z-index:1}
+
+  .controls{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+  button{padding:11px 8px;border-radius:12px;border:none;font-size:13px;font-weight:600;
+    background:var(--accent);color:#fff;cursor:pointer}
+  button.ghost{background:var(--panel);color:var(--text);border:1px solid rgba(255,255,255,.12)}
+  button:disabled{opacity:.4}
+  button.on{background:var(--ok)}
+
+  details{margin-top:12px;background:var(--panel);border-radius:12px;padding:10px 12px}
+  summary{cursor:pointer;font-size:13px;color:var(--muted);font-weight:600}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+  label{font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:4px}
+  input[type=number],input[type=text]{
+    background:#0f1115;border:1px solid rgba(255,255,255,.12);color:var(--text);
+    padding:7px 8px;border-radius:8px;font-size:13px;width:100%;
+  }
+  .check{flex-direction:row;align-items:center;gap:6px;margin-top:16px}
+  .status{font-size:12px;color:var(--muted);text-align:center;margin:12px 0 0;min-height:18px}
+  .status.ok{color:var(--ok)} .status.warn{color:var(--warn)} .status.bad{color:var(--bad)}
+  .note{font-size:11px;color:var(--muted);line-height:1.6;margin-top:12px}
+
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;
+    align-items:flex-end;justify-content:center;z-index:50;padding:0}
+  .modal.show{display:flex}
+  .sheet{background:var(--panel);width:100%;max-width:600px;max-height:88vh;overflow:auto;
+    border-radius:16px 16px 0 0;padding:16px}
+  .sheet h2{font-size:15px;margin:0 0 12px;font-weight:600}
+  .sheet .row{display:flex;gap:8px;align-items:center;margin-bottom:10px}
+  .sheet .row label{flex:none;width:110px;font-size:12px}
+  .sheet .row input[type=text]{flex:1}
+  .blocks{display:flex;flex-direction:column;gap:6px;margin:10px 0}
+  .block{display:flex;align-items:center;gap:8px;background:var(--panel2);
+    padding:7px 9px;border-radius:9px}
+  .block .sw{width:34px;height:34px;border-radius:8px;flex:none;
+    border:1px solid rgba(255,255,255,.12)}
+  .block .idx{font-size:11px;color:var(--muted);width:26px}
+  .block input[type=number]{width:80px}
+  .block .rgbtxt{font-size:11px;color:var(--muted);flex:1;text-align:right}
+  .sheet .actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px}
+  .sheet .actions button{padding:12px}
+  .danger{background:var(--bad)!important}
+  .hint{font-size:11px;color:var(--muted);line-height:1.6;margin:8px 0}
+
+  .import-box{
+    margin-top:12px;padding:12px;border-radius:12px;
+    background:var(--panel2);border:1px dashed rgba(255,255,255,.18);
+  }
+  .import-label{
+    display:block;font-size:12px;font-weight:600;color:var(--accent);
+    margin-bottom:8px;cursor:pointer;
+  }
+  .import-box input[type=file]{
+    width:100%;font-size:12px;color:var(--muted);
+    background:#0f1115;border:1px solid rgba(255,255,255,.12);
+    border-radius:8px;padding:8px;
+  }
+  .import-row{
+    display:flex;align-items:center;gap:8px;margin-top:8px;
+  }
+  .import-row span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .import-row button{padding:8px 14px;font-size:12px}
+</style>
+</head>
+<body>
+
+<h1>pH 试纸识别 · 拍照 + 本地图片</h1>
+
+<div class="cardbar">
+  <select id="cardSelect" title="选择当前使用的色卡"></select>
+  <button id="btnManage" class="ghost">管理</button>
+</div>
+
+<div class="tabbar">
+  <button id="tabCamera" class="active">摄像头实时</button>
+  <button id="tabImage">本地图片</button>
+</div>
+
+<!-- 摄像头面板 -->
+<div class="panel show" id="panelCamera">
+  <div class="stage">
+    <canvas id="preview"></canvas>
+    <div class="roi detect" id="roi" data-label="试纸反应区"></div>
+  </div>
+
+  <div class="controls" style="margin-top:10px">
+    <button id="btnStart">启动摄像头</button>
+    <button id="btnCal" class="ghost">校准比色卡</button>
+    <button id="btnStop" class="ghost">停止</button>
+  </div>
+
+  <details>
+    <summary>比色卡校准设置（点开）</summary>
+    <div class="grid">
+      <label>色块数量 N
+        <input type="number" id="blockCount" value="14" min="2" max="20">
+      </label>
+      <label>起始 pH
+        <input type="number" id="phStart" value="1" step="0.1">
+      </label>
+      <label>结束 pH
+        <input type="number" id="phEnd" value="14" step="0.1">
+      </label>
+      <label>白色参考块索引（留空=不做白平衡）
+        <input type="number" id="whiteIndex" value="" min="0" placeholder="如 0 或 14">
+      </label>
+      <label class="check">
+        <input type="checkbox" id="reverse"> 色卡方向反向
+      </label>
+      <label class="check">
+        <input type="checkbox" id="useSaved" checked> 启动时加载已保存校准
+      </label>
+    </div>
+  </details>
+</div>
+
+<!-- 本地图片面板 -->
+<div class="panel" id="panelImage">
+  <div class="stage" id="imgStage">
+    <canvas id="imgCanvas"></canvas>
+    <div class="img-roi" id="imgRoi"></div>
+    <div class="img-hint" id="imgHint">选择图片后可拖动/缩放蓝色框，框住试纸反应区</div>
+  </div>
+
+  <div class="filebox">
+    <label for="imageInput">本地上传 pH 试纸图片</label>
+    <input type="file" id="imageInput" accept="image/*">
+    <div class="filerow">
+      <span id="imageName" class="muted">未选择图片</span>
+      <button id="btnAnalyzeImage" class="ghost">分析这张图片</button>
+    </div>
+  </div>
+
+  <div class="controls" style="margin-top:10px">
+    <button id="btnRotateLeft" class="ghost">左转 90°</button>
+    <button id="btnRotateRight" class="ghost">右转 90°</button>
+    <button id="btnResetRoi" class="ghost">重置选框</button>
+  </div>
+</div>
+
+<div class="result">
+  <div class="swatch" id="swatch" title="采样颜色"></div>
+  <div class="readout">
+    <div class="ph"><span id="phValue">--</span><small>pH</small></div>
+    <div class="meta">
+      <span id="conf" class="badge bad">未检测</span>
+      <span id="de" class="muted"></span>
+    </div>
+  </div>
+</div>
+
+<div class="chart" id="chart"></div>
+
+<p class="status" id="status">点击“启动摄像头”或上传本地图片开始</p>
+
+<p class="note">
+使用流程：<br>
+1. 摄像头实时：启动 → 校准比色卡 → 对准试纸读数；<br>
+2. 本地图片：切到“本地图片” → 选择照片 → 拖动蓝色框框住试纸反应区 → 点“分析这张图片”；<br>
+3. 图片分析同样会使用当前选中的色卡和白平衡参考；<br>
+4. 顶部下拉框切换色卡，点“管理”可新建/编辑/删除/导出/导入色卡。
+</p>
+
+<div class="modal" id="modal">
+  <div class="sheet">
+    <h2 id="sheetTitle">色卡管理</h2>
+
+    <div id="manageView">
+      <div class="row">
+        <label>当前色卡</label>
+        <input type="text" id="manageName" readonly>
+      </div>
+      <div class="blocks" id="manageBlocks"></div>
+      <div class="actions">
+        <button id="btnNewCard">新建色卡</button>
+        <button id="btnEditCard" class="ghost">编辑当前色卡</button>
+        <button id="btnExport" class="ghost">导出全部色卡</button>
+        <button id="btnDeleteCard" class="danger">删除当前色卡</button>
+        <button id="btnCloseManage" class="ghost">关闭</button>
+      </div>
+
+      <div class="import-box">
+        <label class="import-label" for="fileImport">本地上传色卡文件（JSON）</label>
+        <input type="file" id="fileImport" accept=".json,application/json">
+        <div class="import-row">
+          <span id="fileName" class="muted">未选择文件</span>
+          <button id="btnImport" class="ghost">导入</button>
+        </div>
+      </div>
+
+      <p class="hint">导出文件为 JSON，可备份或分享给其他设备导入。</p>
+    </div>
+
+    <div id="editView" style="display:none">
+      <div class="row">
+        <label>色卡名称</label>
+        <input type="text" id="editName" placeholder="如：某品牌广泛试纸">
+      </div>
+      <p class="hint">把比色卡横向填满画面长框后点“拍照识别颜色”，程序会按色块数量均分取色。识别后可手动修改每个色块的 pH。</p>
+      <div class="row">
+        <label>色块数量</label>
+        <input type="number" id="editCount" value="14" min="2" max="20">
+        <label style="width:auto;margin-left:8px">反向</label>
+        <input type="checkbox" id="editReverse" style="width:auto">
+      </div>
+      <div class="actions" style="grid-template-columns:1fr">
+        <button id="btnCaptureCard">拍照识别颜色</button>
+      </div>
+      <div class="blocks" id="editBlocks"></div>
+      <div class="actions">
+        <button id="btnSaveCard">保存色卡</button>
+        <button id="btnCancelEdit" class="ghost">取消</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+/* ================= 默认色卡 ================= */
+const DEFAULT_CHART = [
+  {ph:1,  rgb:[220,20,40]},  {ph:2,  rgb:[230,60,40]},
+  {ph:3,  rgb:[240,110,40]}, {ph:4,  rgb:[245,165,45]},
+  {ph:5,  rgb:[250,215,55]}, {ph:6,  rgb:[205,225,65]},
+  {ph:7,  rgb:[120,205,80]}, {ph:8,  rgb:[60,195,130]},
+  {ph:9,  rgb:[55,175,195]}, {ph:10, rgb:[65,135,215]},
+  {ph:11, rgb:[65,95,205]},  {ph:12, rgb:[105,80,200]},
+  {ph:13, rgb:[145,70,185]}, {ph:14, rgb:[120,50,145]},
+];
+
+/* ================= 状态 ================= */
+const video = document.createElement('video');
+video.autoplay = true; video.playsInline = true; video.muted = true;
+
+const canvas = document.getElementById('preview');
+const ctx = canvas.getContext('2d', {willReadFrequently:true});
+const roiEl = document.getElementById('roi');
+
+let stream=null, whiteRef=null;
+let running=false, loopId=null, mode='detect';
+
+let cards = [];
+let currentCardId = null;
+let editing = null;
+
+/* 图片模式状态 */
+const imgCanvas = document.getElementById('imgCanvas');
+const imgCtx = imgCanvas.getContext('2d', {willReadFrequently:true});
+const imgRoiEl = document.getElementById('imgRoi');
+let imgBitmap = null;          // 原始图片（ImageBitmap）
+let imgRotation = 0;           // 0/90/180/270
+let imgRoi = {x:0.3, y:0.375, w:0.4, h:0.25}; // 归一化坐标
+let imgDrag = null;            // {type:'move'|'resize', startX, startY, orig}
+
+/* ================= 摄像头 ================= */
+async function start(){
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({
+      video:{facingMode:{ideal:'environment'}, width:{ideal:1920}, height:{ideal:1080}},
+      audio:false
+    });
+    video.srcObject = stream;
+    await video.play();
+    if(!video.videoWidth) await new Promise(r => video.onloadedmetadata = r);
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    document.querySelector('#panelCamera .stage').style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
+    running = true;
+    setStatus('已启动，可先校准比色卡，或直接对准试纸','ok');
+    tick();
+  }catch(e){
+    setStatus('摄像头启动失败：' + e.message, 'bad');
+  }
+}
+
+function tick(){
+  if(!running) return;
+  if(video.videoWidth){
+    if(canvas.width !== video.videoWidth){
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+    }
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    if(mode === 'detect') analyze();
+  }
+  loopId = setTimeout(tick, 200);
+}
+
+function stop(){
+  running = false;
+  clearTimeout(loopId);
+  if(stream){ stream.getTracks().forEach(t => t.stop()); stream = null; }
+  video.srcObject = null;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  setStatus('已停止');
+}
+
+/* ================= ROI（摄像头） ================= */
+function detectROI(){
+  const W=canvas.width, H=canvas.height;
+  const w=Math.round(W*0.40), h=Math.round(H*0.25);
+  return {x:Math.round((W-w)/2), y:Math.round((H-h)/2), w, h};
+}
+function calibrateROI(){
+  const W=canvas.width, H=canvas.height;
+  const w=Math.round(W*0.80), h=Math.round(H*0.30);
+  return {x:Math.round((W-w)/2), y:Math.round((H-h)/2), w, h};
+}
+
+/* ================= 比色卡校准 ================= */
+function toggleCalibrate(){
+  if(!running){ setStatus('请先启动摄像头','warn'); return; }
+  if(mode === 'detect'){
+    mode = 'calibrate';
+    roiEl.className = 'roi calibrate';
+    roiEl.dataset.label = '比色卡校准区（横向填满）';
+    roiEl.style.setProperty('--n', Math.max(2, parseInt(document.getElementById('blockCount').value)||14));
+    document.getElementById('btnCal').textContent = '拍照完成校准';
+    document.getElementById('btnCal').classList.add('on');
+    setStatus('把比色卡横向填满长框，色块顺序与设置一致，然后点“拍照完成校准”','warn');
+  }else{
+    doCalibrate();
+  }
+}
+
+function doCalibrate(){
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  const roi = calibrateROI();
+  const N = Math.max(2, parseInt(document.getElementById('blockCount').value)||14);
+  const phStart = parseFloat(document.getElementById('phStart').value);
+  const phEnd = parseFloat(document.getElementById('phEnd').value);
+  const reverse = document.getElementById('reverse').checked;
+  const whiteIdxRaw = document.getElementById('whiteIndex').value.trim();
+
+  const blockW = roi.w / N;
+  const rawBlocks = [];
+
+  for(let i=0;i<N;i++){
+    const bx = Math.round(roi.x + i*blockW + blockW*0.20);
+    const by = Math.round(roi.y + roi.h*0.20);
+    const bw = Math.max(2, Math.round(blockW*0.60));
+    const bh = Math.max(2, Math.round(roi.h*0.60));
+    let data;
+    try{ data = ctx.getImageData(bx, by, bw, bh).data; }
+    catch(e){ setStatus('校准取色失败：' + e.message,'bad'); return; }
+    rawBlocks.push(medianRGB(data));
+  }
+
+  if(whiteIdxRaw !== ''){
+    const idx = parseInt(whiteIdxRaw);
+    const w = rawBlocks[idx];
+    if(w && w[0]>10 && w[1]>10 && w[2]>10){
+      whiteRef = w;
+      rawBlocks.forEach(b => {
+        b[0] = Math.min(255, b[0]*255/w[0]);
+        b[1] = Math.min(255, b[1]*255/w[1]);
+        b[2] = Math.min(255, b[2]*255/w[2]);
+      });
+      setStatus(`校准完成，白平衡参考块 #${idx}`,'ok');
+    }else{
+      whiteRef = null;
+      setStatus('白色参考块太暗，已跳过白平衡','warn');
+    }
+  }else{
+    whiteRef = null;
+  }
+
+  const chart = rawBlocks.map((rgb, i) => {
+    const t = N===1 ? 0 : i/(N-1);
+    const ph = phStart + (phEnd-phStart) * (reverse ? (1-t) : t);
+    return {ph: Math.round(ph*10)/10, rgb};
+  });
+
+  const cur = getCurrentCard();
+  if(cur && cur.builtin){
+    const copy = {id: uid(), name: cur.name + '（校准副本）', chart, whiteRef};
+    cards.push(copy);
+    currentCardId = copy.id;
+  }else if(cur){
+    cur.chart = chart;
+    cur.whiteRef = whiteRef;
+  }
+  saveCards();
+  refreshCardSelect();
+  buildChart(getCurrentCard().chart);
+  exitCalibrate();
+  setStatus('校准完成，已更新当前色卡','ok');
+}
+
+function exitCalibrate(){
+  mode = 'detect';
+  roiEl.className = 'roi detect';
+  roiEl.dataset.label = '试纸反应区';
+  roiEl.style.removeProperty('--n');
+  const btn = document.getElementById('btnCal');
+  btn.textContent = '校准比色卡';
+  btn.classList.remove('on');
+}
+
+/* ================= 通用比色 ================= */
+function matchColor(mr, mg, mb){
+  const card = getCurrentCard();
+  const chart = card ? card.chart : DEFAULT_CHART;
+  const lab = rgbToLab(mr,mg,mb);
+  let best=null, second=null;
+  for(const c of chart){
+    const clab = rgbToLab(c.rgb[0], c.rgb[1], c.rgb[2]);
+    const dE = deltaE(lab, clab);
+    if(!best || dE < best.dE){ second = best; best = {c, dE}; }
+    else if(!second || dE < second.dE){ second = {c, dE}; }
+  }
+  const gap = second ? second.dE - best.dE : 0;
+  return {best, gap, card};
+}
+
+function showResult(mr, mg, mb){
+  const swatch = document.getElementById('swatch');
+  const phValue = document.getElementById('phValue');
+  const confEl = document.getElementById('conf');
+  const deEl = document.getElementById('de');
+
+  swatch.style.background = `rgb(${mr},${mg},${mb})`;
+  const {best, gap, card} = matchColor(mr,mg,mb);
+
+  phValue.textContent = best.c.ph;
+  let txt, cls;
+  if(best.dE < 10 && gap > 4){ txt='置信度 高'; cls='ok'; }
+  else if(best.dE < 22){ txt='置信度 中'; cls='warn'; }
+  else { txt='置信度 低'; cls='bad'; }
+  confEl.textContent = txt;
+  confEl.className = `badge ${cls}`;
+  deEl.textContent = `ΔE=${best.dE.toFixed(1)} 区分度=${gap.toFixed(1)}`;
+  highlightChart(best.c.ph);
+  return {best, card};
+}
+
+function collectColor(data, useWhite){
+  const rs=[], gs=[], bs=[];
+  for(let i=0;i<data.length;i+=4){
+    let r=data[i], g=data[i+1], b=data[i+2];
+    if(useWhite){
+      r = Math.min(255, r*255/useWhite[0]);
+      g = Math.min(255, g*255/useWhite[1]);
+      b = Math.min(255, b*255/useWhite[2]);
+    }
+    const max=Math.max(r,g,b), min=Math.min(r,g,b);
+    const sat = max===0 ? 0 : (max-min)/max;
+    const bright = 0.299*r + 0.587*g + 0.114*b;
+    if(sat < 0.15) continue;
+    if(bright < 25 || bright > 250) continue;
+    rs.push(r); gs.push(g); bs.push(b);
+  }
+  if(rs.length < 40) return null;
+  return [median(rs), median(gs), median(bs)];
+}
+
+/* ================= 摄像头检测 ================= */
+function analyze(){
+  const card = getCurrentCard();
+  const useWhite = card && card.whiteRef ? card.whiteRef : whiteRef;
+  const roi = detectROI();
+  let data;
+  try{ data = ctx.getImageData(roi.x, roi.y, roi.w, roi.h).data; }
+  catch(e){ return; }
+
+  const rgb = collectColor(data, useWhite);
+  if(!rgb){
+    document.getElementById('phValue').textContent = '--';
+    document.getElementById('conf').textContent = '未检测';
+    document.getElementById('conf').className = 'badge bad';
+    document.getElementById('de').textContent = '';
+    document.getElementById('swatch').style.background = '#333';
+    setStatus('未检测到明显颜色，靠近试纸反应区','warn');
+    return;
+  }
+  const {card:c} = showResult(rgb[0], rgb[1], rgb[2]);
+  setStatus(`当前色卡：${c ? c.name : '默认'}`,'ok');
+}
+
+/* ================= 图片模式 ================= */
+const imageInput = document.getElementById('imageInput');
+imageInput.addEventListener('change', e => {
+  const f = e.target.files[0];
+  document.getElementById('imageName').textContent = f ? f.name : '未选择图片';
+  if(!f) return;
+  const url = URL.createObjectURL(f);
+  const img = new Image();
+  img.onload = () => {
+    createImageBitmap(img).then(bmp => {
+      imgBitmap = bmp;
+      imgRotation = 0;
+      imgRoi = {x:0.3, y:0.375, w:0.4, h:0.25};
+      drawImageToCanvas();
+      URL.revokeObjectURL(url);
+      setStatus('图片已载入，拖动蓝色框框住试纸反应区后点“分析这张图片”','ok');
+    });
+  };
+  img.onerror = () => {
+    URL.revokeObjectURL(url);
+    setStatus('图片加载失败','bad');
+  };
+  img.src = url;
+});
+
+function drawImageToCanvas(){
+  if(!imgBitmap) return;
+  const rotated = (imgRotation % 180) !== 0;
+  const iw = rotated ? imgBitmap.height : imgBitmap.width;
+  const ih = rotated ? imgBitmap.width : imgBitmap.height;
+
+  // 画布使用图片原始分辨率，CSS 负责缩放显示
+  imgCanvas.width = iw;
+  imgCanvas.height = ih;
+  imgCtx.save();
+  imgCtx.translate(iw/2, ih/2);
+  imgCtx.rotate(imgRotation * Math.PI/180);
+  imgCtx.drawImage(imgBitmap, -imgBitmap.width/2, -imgBitmap.height/2);
+  imgCtx.restore();
+
+  // 让 stage 比例贴合图片
+  document.getElementById('imgStage').style.aspectRatio = `${iw} / ${ih}`;
+  updateRoiElement();
+}
+
+function updateRoiElement(){
+  if(!imgBitmap) return;
+  const rotated = (imgRotation % 180) !== 0;
+  const iw = rotated ? imgBitmap.height : imgBitmap.width;
+  const ih = rotated ? imgBitmap.width : imgBitmap.height;
+  imgRoiEl.style.left = (imgRoi.x * 100) + '%';
+  imgRoiEl.style.top = (imgRoi.y * 100) + '%';
+  imgRoiEl.style.width = (imgRoi.w * 100) + '%';
+  imgRoiEl.style.height = (imgRoi.h * 100) + '%';
+}
+
+/* 拖动/缩放蓝色框 */
+imgRoiEl.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  imgRoiEl.setPointerCapture(e.pointerId);
+  const rect = imgRoiEl.getBoundingClientRect();
+  const nearRight = e.clientX > rect.right - 24;
+  const nearBottom = e.clientY > rect.bottom - 24;
+  imgDrag = {
+    type: (nearRight && nearBottom) ? 'resize' : 'move',
+    startX: e.clientX, startY: e.clientY,
+    orig: {...imgRoi}
+  };
+});
+imgRoiEl.addEventListener('pointermove', e => {
+  if(!imgDrag) return;
+  const stage = document.getElementById('imgStage').getBoundingClientRect();
+  const dx = (e.clientX - imgDrag.startX) / stage.width;
+  const dy = (e.clientY - imgDrag.startY) / stage.height;
+  if(imgDrag.type === 'move'){
+    imgRoi.x = clamp(imgDrag.orig.x + dx, 0, 1 - imgRoi.w);
+    imgRoi.y = clamp(imgDrag.orig.y + dy, 0, 1 - imgRoi.h);
+  }else{
+    imgRoi.w = clamp(imgDrag.orig.w + dx, 0.05, 1 - imgRoi.x);
+    imgRoi.h = clamp(imgDrag.orig.h + dy, 0.05, 1 - imgRoi.y);
+  }
+  updateRoiElement();
+});
+imgRoiEl.addEventListener('pointerup', () => { imgDrag = null; });
+imgRoiEl.addEventListener('pointercancel', () => { imgDrag = null; });
+
+document.getElementById('btnRotateLeft').onclick = () => {
+  if(!imgBitmap) return;
+  imgRotation = (imgRotation + 270) % 360;
+  drawImageToCanvas();
+};
+document.getElementById('btnRotateRight').onclick = () => {
+  if(!imgBitmap) return;
+  imgRotation = (imgRotation + 90) % 360;
+  drawImageToCanvas();
+};
+document.getElementById('btnResetRoi').onclick = () => {
+  if(!imgBitmap) return;
+  imgRoi = {x:0.3, y:0.375, w:0.4, h:0.25};
+  updateRoiElement();
+};
+
+document.getElementById('btnAnalyzeImage').onclick = () => {
+  if(!imgBitmap){ setStatus('请先选择一张本地图片','warn'); return; }
+  const W = imgCanvas.width, H = imgCanvas.height;
+  const x = Math.round(imgRoi.x * W);
+  const y = Math.round(imgRoi.y * H);
+  const w = Math.max(2, Math.round(imgRoi.w * W));
+  const h = Math.max(2, Math.round(imgRoi.h * H));
+
+  let data;
+  try{ data = imgCtx.getImageData(x, y, w, h).data; }
+  catch(e){ setStatus('读取图片像素失败：' + e.message,'bad'); return; }
+
+  const card = getCurrentCard();
+  const useWhite = card && card.whiteRef ? card.whiteRef : whiteRef;
+  const rgb = collectColor(data, useWhite);
+  if(!rgb){
+    document.getElementById('phValue').textContent = '--';
+    document.getElementById('conf').textContent = '未检测';
+    document.getElementById('conf').className = 'badge bad';
+    document.getElementById('de').textContent = '';
+    document.getElementById('swatch').style.background = '#333';
+    setStatus('选区内没有检测到明显颜色，调整蓝框范围再试','warn');
+    return;
+  }
+  const {card:c} = showResult(rgb[0], rgb[1], rgb[2]);
+  setStatus(`图片分析完成 · 色卡：${c ? c.name : '默认'}`,'ok');
+};
+
+function clamp(v, min, max){ return Math.max(min, Math.min(max, v)); }
+
+/* ================= 标签切换 ================= */
+document.getElementById('tabCamera').onclick = () => {
+  document.getElementById('tabCamera').classList.add('active');
+  document.getElementById('tabImage').classList.remove('active');
+  document.getElementById('panelCamera').classList.add('show');
+  document.getElementById('panelImage').classList.remove('show');
+};
+document.getElementById('tabImage').onclick = () => {
+  document.getElementById('tabImage').classList.add('active');
+  document.getElementById('tabCamera').classList.remove('active');
+  document.getElementById('panelImage').classList.add('show');
+  document.getElementById('panelCamera').classList.remove('show');
+  if(running) stop();
+};
+
+/* ================= 色卡库 ================= */
+function uid(){ return 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
+
+function initCards(){
+  const saved = loadCards();
+  if(saved && saved.cards && saved.cards.length){
+    cards = saved.cards;
+    currentCardId = saved.currentId && cards.some(c=>c.id===saved.currentId)
+      ? saved.currentId : cards[0].id;
+  }else{
+    cards = [
+      {id:'builtin-default', name:'内置通用色卡', builtin:true, chart:DEFAULT_CHART, whiteRef:null}
+    ];
+    currentCardId = 'builtin-default';
+  }
+}
+
+function getCurrentCard(){
+  return cards.find(c => c.id === currentCardId) || null;
+}
+
+function saveCards(){
+  try{
+    localStorage.setItem('phCards', JSON.stringify({cards, currentId:currentCardId}));
+  }catch(e){}
+}
+function loadCards(){
+  try{
+    const raw = localStorage.getItem('phCards');
+    return raw ? JSON.parse(raw) : null;
+  }catch(e){ return null; }
+}
+
+function refreshCardSelect(){
+  const sel = document.getElementById('cardSelect');
+  sel.innerHTML = '';
+  cards.forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c.id;
+    opt.textContent = c.name + (c.builtin ? '（内置）' : '');
+    sel.appendChild(opt);
+  });
+  sel.value = currentCardId;
+}
+
+document.getElementById('cardSelect').addEventListener('change', e => {
+  currentCardId = e.target.value;
+  saveCards();
+  buildChart(getCurrentCard().chart);
+  setStatus(`已切换到：${getCurrentCard().name}`,'ok');
+});
+
+/* ================= 管理弹层 ================= */
+const modal = document.getElementById('modal');
+const manageView = document.getElementById('manageView');
+const editView = document.getElementById('editView');
+
+document.getElementById('btnManage').onclick = () => {
+  modal.classList.add('show');
+  showManage();
+};
+
+document.getElementById('btnCloseManage').onclick = () => {
+  modal.classList.remove('show');
+  exitCalibrate();
+};
+
+function showManage(){
+  manageView.style.display = 'block';
+  editView.style.display = 'none';
+  document.getElementById('sheetTitle').textContent = '色卡管理';
+  const card = getCurrentCard();
+  document.getElementById('manageName').value = card ? card.name : '';
+
+  const box = document.getElementById('manageBlocks');
+  box.innerHTML = '';
+  if(card){
+    card.chart.forEach((b, i) => {
+      const d = document.createElement('div');
+      d.className = 'block';
+      d.innerHTML = `
+        <span class="idx">#${i}</span>
+        <div class="sw" style="background:rgb(${b.rgb.map(v=>Math.round(v)).join(',')})"></div>
+        <span class="muted">pH ${b.ph}</span>
+        <span class="rgbtxt">${b.rgb.map(v=>Math.round(v)).join(',')}</span>
+      `;
+      box.appendChild(d);
+    });
+  }
+  document.getElementById('btnDeleteCard').disabled = !card || card.builtin;
+}
+
+function showEdit(){
+  manageView.style.display = 'none';
+  editView.style.display = 'block';
+  document.getElementById('sheetTitle').textContent = editing.isNew ? '新建色卡' : '编辑色卡';
+  document.getElementById('editName').value = editing.name;
+  document.getElementById('editCount').value = editing.chart.length || 14;
+  document.getElementById('editReverse').checked = false;
+  renderEditBlocks();
+}
+
+function renderEditBlocks(){
+  const box = document.getElementById('editBlocks');
+  box.innerHTML = '';
+  editing.chart.forEach((b, i) => {
+    const d = document.createElement('div');
+    d.className = 'block';
+    d.innerHTML = `
+      <span class="idx">#${i}</span>
+      <div class="sw" style="background:rgb(${b.rgb.map(v=>Math.round(v)).join(',')})"></div>
+      <input type="number" step="0.1" value="${b.ph}" data-i="${i}">
+      <span class="rgbtxt">${b.rgb.map(v=>Math.round(v)).join(',')}</span>
+    `;
+    d.querySelector('input').addEventListener('input', e => {
+      const idx = parseInt(e.target.dataset.i);
+      editing.chart[idx].ph = parseFloat(e.target.value) || 0;
+    });
+    box.appendChild(d);
+  });
+}
+
+document.getElementById('btnNewCard').onclick = () => {
+  editing = {isNew:true, id:uid(), name:'新色卡', chart:[], whiteRef:null};
+  showEdit();
+};
+
+document.getElementById('btnEditCard').onclick = () => {
+  const card = getCurrentCard();
+  if(!card) return;
+  if(card.builtin){
+    editing = {isNew:true, id:uid(), name:card.name + '（副本）',
+      chart:JSON.parse(JSON.stringify(card.chart)), whiteRef:card.whiteRef};
+  }else{
+    editing = {isNew:false, id:card.id, name:card.name,
+      chart:JSON.parse(JSON.stringify(card.chart)), whiteRef:card.whiteRef};
+  }
+  showEdit();
+};
+
+document.getElementById('btnCancelEdit').onclick = () => {
+  editing = null;
+  showManage();
+};
+
+document.getElementById('btnCaptureCard').onclick = () => {
+  if(!running){ setStatus('请先启动摄像头','warn'); return; }
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+  const N = Math.max(2, parseInt(document.getElementById('editCount').value)||14);
+  const reverse = document.getElementById('editReverse').checked;
+  const roi = calibrateROI();
+  const blockW = roi.w / N;
+  const blocks = [];
+
+  for(let i=0;i<N;i++){
+    const bx = Math.round(roi.x + i*blockW + blockW*0.20);
+    const by = Math.round(roi.y + roi.h*0.20);
+    const bw = Math.max(2, Math.round(blockW*0.60));
+    const bh = Math.max(2, Math.round(roi.h*0.60));
+    let data;
+    try{ data = ctx.getImageData(bx, by, bw, bh).data; }
+    catch(e){ setStatus('取色失败：' + e.message,'bad'); return; }
+    blocks.push(medianRGB(data));
+  }
+
+  editing.chart = blocks.map((rgb, i) => {
+    const idx = reverse ? (N-1-i) : i;
+    return {ph: idx+1, rgb};
+  });
+  renderEditBlocks();
+  setStatus('已识别 ' + N + ' 个色块，请手动填写各色块 pH','ok');
+};
+
+document.getElementById('btnSaveCard').onclick = () => {
+  if(!editing) return;
+  const name = document.getElementById('editName').value.trim();
+  if(!name){ setStatus('请填写色卡名称','warn'); return; }
+  if(!editing.chart.length){ setStatus('请先拍照识别颜色','warn'); return; }
+
+  editing.name = name;
+  if(editing.isNew){
+    cards.push({id:editing.id, name, chart:editing.chart, whiteRef:editing.whiteRef});
+    currentCardId = editing.id;
+  }else{
+    const idx = cards.findIndex(c => c.id === editing.id);
+    if(idx >= 0) cards[idx] = {id:editing.id, name, chart:editing.chart, whiteRef:editing.whiteRef};
+  }
+  saveCards();
+  refreshCardSelect();
+  buildChart(getCurrentCard().chart);
+  editing = null;
+  showManage();
+  setStatus('色卡已保存','ok');
+};
+
+document.getElementById('btnDeleteCard').onclick = () => {
+  const card = getCurrentCard();
+  if(!card || card.builtin) return;
+  if(!confirm(`确定删除色卡“${card.name}”？`)) return;
+  cards = cards.filter(c => c.id !== card.id);
+  currentCardId = cards[0] ? cards[0].id : null;
+  saveCards();
+  refreshCardSelect();
+  buildChart(getCurrentCard().chart);
+  showManage();
+  setStatus('已删除','warn');
+};
+
+/* ================= 导出 / 导入色卡 ================= */
+document.getElementById('btnExport').onclick = () => {
+  const data = JSON.stringify({cards, currentId:currentCardId}, null, 2);
+  const blob = new Blob([data], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'ph-cards.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+document.getElementById('fileImport').addEventListener('change', e => {
+  const f = e.target.files[0];
+  document.getElementById('fileName').textContent = f ? f.name : '未选择文件';
+});
+
+document.getElementById('btnImport').onclick = () => {
+  const input = document.getElementById('fileImport');
+  const file = input.files[0];
+  if(!file){ setStatus('请先选择本地的 JSON 色卡文件','warn'); return; }
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try{
+      const obj = JSON.parse(ev.target.result);
+      if(!obj.cards || !Array.isArray(obj.cards)) throw new Error('文件里没有 cards 数组');
+
+      const existingIds = new Set(cards.map(c => c.id));
+      let added = 0, renamed = 0;
+
+      obj.cards.forEach(raw => {
+        if(!raw || !Array.isArray(raw.chart) || !raw.chart.length) return;
+        const chart = raw.chart.map(b => ({
+          ph: Number(b.ph) || 0,
+          rgb: (b.rgb || []).slice(0,3).map(v => Math.max(0, Math.min(255, Math.round(Number(v)||0))))
+        })).filter(b => b.rgb.length === 3);
+        if(!chart.length) return;
+
+        let id = raw.id || uid();
+        if(existingIds.has(id)){ id = uid(); renamed++; }
+        existingIds.add(id);
+
+        let name = (raw.name || '导入色卡').trim() || '导入色卡';
+        const names = new Set(cards.map(c => c.name));
+        if(names.has(name)){
+          let n = 2;
+          while(names.has(`${name} (${n})`)) n++;
+          name = `${name} (${n})`;
+        }
+
+        cards.push({
+          id, name, chart,
+          whiteRef: Array.isArray(raw.whiteRef) && raw.whiteRef.length === 3
+            ? raw.whiteRef.map(v => Math.max(0, Math.min(255, Number(v)||0)))
+            : null
+        });
+        added++;
+      });
+
+      if(!added){ setStatus('文件里没有有效的色卡数据','warn'); return; }
+
+      if(obj.currentId && cards.some(c => c.id === obj.currentId)){
+        currentCardId = obj.currentId;
+      }else if(!getCurrentCard()){
+        currentCardId = cards[0].id;
+      }
+
+      saveCards();
+      refreshCardSelect();
+      buildChart(getCurrentCard().chart);
+      showManage();
+      setStatus(`导入完成：新增 ${added} 个色卡${renamed ? `，${renamed} 个 id 冲突已重建` : ''}`,'ok');
+      input.value = '';
+      document.getElementById('fileName').textContent = '未选择文件';
+    }catch(err){
+      setStatus('导入失败：' + err.message,'bad');
+    }
+  };
+  reader.onerror = () => setStatus('读取文件失败','bad');
+  reader.readAsText(file, 'utf-8');
+};
+
+/* ================= 工具 ================= */
+function median(arr){ const a=arr.slice().sort((x,y)=>x-y); return a[Math.floor(a.length/2)]; }
+function medianRGB(data){
+  const rs=[],gs=[],bs=[];
+  for(let i=0;i<data.length;i+=4){ rs.push(data[i]); gs.push(data[i+1]); bs.push(data[i+2]); }
+  return [median(rs), median(gs), median(bs)];
+}
+function rgbToLab(r,g,b){
+  let rr=r/255, gg=g/255, bb=b/255;
+  rr = rr>0.04045 ? Math.pow((rr+0.055)/1.055,2.4) : rr/12.92;
+  gg = gg>0.04045 ? Math.pow((gg+0.055)/1.055,2.4) : gg/12.92;
+  bb = bb>0.04045 ? Math.pow((bb+0.055)/1.055,2.4) : bb/12.92;
+  let x = rr*0.4124 + gg*0.3576 + bb*0.1805;
+  let y = rr*0.2126 + gg*0.7152 + bb*0.0722;
+  let z = rr*0.0193 + gg*0.1192 + bb*0.9505;
+  x/=0.95047; y/=1.0; z/=1.08883;
+  const f = t => t>0.008856 ? Math.cbrt(t) : (7.787*t+16/116);
+  const fx=f(x), fy=f(y), fz=f(z);
+  return [116*fy-16, 500*(fx-fy), 200*(fy-fz)];
+}
+function deltaE(a,b){ return Math.hypot(a[0]-b[0],a[1]-b[1],a[2]-b[2]); }
+function setStatus(msg,type){
+  const el=document.getElementById('status');
+  el.textContent=msg; el.className='status '+(type||'');
+}
+
+/* ================= 色卡条 ================= */
+function buildChart(chart){
+  const el = document.getElementById('chart');
+  el.innerHTML = '';
+  (chart||[]).forEach(c => {
+    const d = document.createElement('div');
+    d.className='chip'; d.dataset.ph=c.ph;
+    d.style.background=`rgb(${c.rgb.map(v=>Math.round(v)).join(',')})`;
+    d.innerHTML=`<span>${c.ph}</span>`;
+    el.appendChild(d);
+  });
+}
+function highlightChart(ph){
+  document.querySelectorAll('.chip').forEach(el => {
+    el.classList.toggle('active', Number(el.dataset.ph)===ph);
+  });
+}
+
+/* ================= 初始化 ================= */
+initCards();
+refreshCardSelect();
+buildChart(getCurrentCard() ? getCurrentCard().chart : DEFAULT_CHART);
+setStatus('点击“启动摄像头”或上传本地图片开始');
+
+document.getElementById('btnStart').onclick = start;
+document.getElementById('btnCal').onclick = toggleCalibrate;
+document.getElementById('btnStop').onclick = stop;
+
+document.getElementById('blockCount').addEventListener('input', e => {
+  const n = Math.max(2, parseInt(e.target.value)||14);
+  roiEl.style.setProperty('--n', n);
+});
+</script>
+</body>
+</html>
